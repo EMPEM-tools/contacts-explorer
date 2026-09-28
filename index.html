@@ -181,8 +181,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
                rel="noopener">schema</a>. Please ensure for best performance that there are
             hydrogens in your model. A .pdb only — mmCIF is not parsed here. getcontacts is
             VMD-based, so it detects contacts to ligands and glycans too, and any chain that
-            includes them is selectable below (water is excluded from the chain list — nobody
-            wants to compare against it).
+            
         </div>
         <div style="margin-top:16px;">
             <button class="btn btn-primary" id="uploadBtn" onclick="uploadFile()">Upload →</button>
@@ -213,11 +212,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
                 <span><span class="swatch" style="background:#3B82C4;"></span>chain 2</span>
                 <span><span class="swatch" style="background:#DC2626;"></span>contact residues</span>
                 <span><span class="swatch" style="background:#D9D9D9;"></span>everything else</span>
-            </div>
-            <div class="hint">
-                Highlighted residues are matched by number only — an insertion-coded residue
-                (e.g. 104A) highlights via its base number 104. The selection strings below are
-                exact, insertion codes included.
             </div>
         </div>
 
@@ -255,11 +249,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
             </div>
 
             <div class="tab-panel" id="tabUnique" style="display:none;">
-                <div class="hint">
-                    One row per contacting residue pair, deduplicated across atoms — matching
-                    what <code>get_unique_contact_pairs.py</code> did to <code>residue_mapping.csv</code>,
-                    with every interaction type seen for that pair listed together.
-                </div>
                 <div style="margin-top:8px;">
                     <button class="btn-mini" onclick="downloadCsv('unique', 'unique_pairs')">Download CSV</button>
                 </div>
@@ -313,11 +302,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
                     <span class="itype-tag itype-wb">wb</span> water bridge
                     <div class="key-sub">covers wb, wb2, lwb, lwb2</div>
                 </div>
-                <div class="key-row"><span class="itype-tag itype-other">other</span> unrecognised label</div>
-            </div>
-            <div class="hint">
-                Colours group by family, not exact string — get_static_contacts.py reports the
-                more specific variant (e.g. hbss), never the bare family name.
             </div>
         </div>
     </div>
@@ -403,10 +387,6 @@ async function uploadFile() {
                 '<label><input type="checkbox" id="' + id + '" value="' + t + '"' +
                 (t === 'all' ? ' checked' : '') + ' onchange="onItypeChange(this.value)">' + t + '</label>');
         });
-        document.getElementById('pickerHint').textContent =
-            '"all" covers every interaction type get_static_contacts.py supports (the default); ' +
-            'check off a specific subset instead to narrow it. Everything is already fetched, ' +
-            'so narrowing is instant -- it filters in the browser, it does not re-run getcontacts.';
 
         document.getElementById('picker').style.display = 'block';
         document.getElementById('results').style.display = 'grid';
@@ -485,12 +465,8 @@ function renderViewer(highlightPairs) {
 }
 
 // Only fires on a chain change (upload counts as one) -- never on an
-// interaction-type checkbox, which is now a pure client-side filter over
-// this cached result (see applyFilterAndRender). Always requests itypes=
-// ['all'], regardless of what is currently checked: 'all' is a strict
-// superset of every other combination get_static_contacts.py can compute,
-// so one fetch covers every possible filter state and a checkbox toggle
-// never needs to ask the server again.
+// interaction-type checkbox, which is a pure client-side filter over this
+// cached result (see applyFilterAndRender).
 //
 // _reqSeq still guards this: two chain changes in quick succession can leave
 // two requests in flight, and a slow first reply must not clobber a faster
