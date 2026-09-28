@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contacts Explorer</title>
+<meta name="description" content="Explore inter-chain contacts in a PDB structure entirely in your browser.">
+<style>
+:root {
+    --surface: #ffffff; --bg: #fafafa; --border: #e5e7eb;
+    --text: #1c1c1e; --text-muted: #6b7280; --accent: #E8823A;
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SFMono-Regular', ui-monospace, 'Cascadia Mono', Menlo, monospace;
+}
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body); }
+<style>
+    .container { background: transparent; box-shadow: none; border: none; padding: 0; }
+    .px-page { max-width: 1000px; margin: 0 auto; padding: 24px 20px 60px; }
+    h2 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; font-family: var(--font-mono); }
+
+    .card {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 22px 26px; margin-bottom: 20px;
+    }
+    .card h3 { font-size: 14px; font-weight: 700; margin: 0 0 14px; }
+
+    .file-drop {
+        border: 2px dashed var(--border); border-radius: 8px; padding: 20px;
+        text-align: center; cursor: pointer; background: var(--bg);
+        transition: border-color .15s, background .15s;
+    }
+    .file-drop:hover, .file-drop.drag-over { border-color: var(--accent); background: #fff8f4; }
+    .file-drop input[type=file] { display: none; }
+    .file-drop .drop-label { font-size: 13px; color: var(--text-muted); }
+    .file-drop .drop-label strong { color: var(--accent); }
+    .chosen { font-size: 12px; font-family: var(--font-mono); color: var(--text); margin-top: 10px; }
+    .hint { font-size: 12px; color: var(--text-muted); margin-top: 10px; line-height: 1.6; }
+
+    .btn { padding: 9px 22px; border-radius: 6px; font-size: 14px; font-weight: 700; border: none; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-mini {
+        padding: 5px 14px; font-size: 12px; font-weight: 600;
+        border: 1px solid var(--border); border-radius: 6px;
+        background: var(--surface); color: var(--text); cursor: pointer;
+    }
+    .btn-mini:hover { background: var(--bg); }
+
+    #results, #picker { display: none; }
+
+    .cx-grid { display: grid; grid-template-columns: 340px 1fr 200px; gap: 20px; align-items: start; }
+    @media (max-width: 1100px) { .cx-grid { grid-template-columns: 1fr; } }
+
+    #viewer {
+        position: relative; overflow: hidden;
+        width: 100%; height: 480px; border-radius: 8px; border: 1px solid var(--border);
+        background: #fff;
+    }
+    /* 3Dmol.js draws its WebGL canvas absolutely-positioned relative to the
+       nearest positioned ancestor. Without position:relative here, the canvas
+       escapes this box and renders relative to the page instead -- the "keeps
+       popping out" symptom. */
+    .viewer-legend {
+        display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px;
+        font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);
+    }
+    .viewer-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+    .chain-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--text); }
+    .field select {
+        padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+        background: var(--surface); font-family: var(--font-mono); font-size: 13px; min-width: 160px;
+    }
+
+    .itype-grid {
+        display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 13px;
+    }
+    .itype-grid label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+
+    .stat-row { display: flex; gap: 20px; flex-wrap: wrap; margin: 4px 0 14px; align-items: center; }
+    .stat { font-family: var(--font-mono); font-size: 13px; }
+    .stat b { display: block; font-size: 20px; font-family: var(--font-body); color: var(--text); }
+    .live-status {
+        font-size: 11px; font-family: var(--font-mono); color: var(--accent);
+        opacity: 0; transition: opacity .15s;
+    }
+    .live-status.on { opacity: 1; }
+
+    .sel-box {
+        background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 10px;
+    }
+    .sel-box .sel-head {
+        display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
+    }
+    .sel-box .sel-head b { font-size: 13px; }
+    .sel-box code {
+        display: block; font-family: var(--font-mono); font-size: 12.5px; word-break: break-all;
+        background: var(--surface); border: 1px solid var(--border); border-radius: 5px;
+        padding: 8px 10px; margin-top: 4px;
+    }
+
+    .tbl-wrap { overflow-x: auto; margin-top: 10px; }
+    table.contacts { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+    table.contacts th, table.contacts td {
+        text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border);
+        font-family: var(--font-mono); white-space: nowrap;
+    }
+    table.contacts th { color: var(--text-muted); font-weight: 600; font-size: 11px;
+                        text-transform: uppercase; letter-spacing: .03em; }
+    table.contacts th.sortable { cursor: pointer; user-select: none; }
+    table.contacts th.sortable:hover { color: var(--text); }
+    table.contacts th.sort-active { color: var(--accent); }
+    .itype-tag {
+        display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+        font-weight: 700;
+    }
+    /* Okabe-Ito palette -- chosen because it is safe across the common forms of
+       colour blindness (deuteranopia, protanopia, tritanopia), not just visually
+       distinct to typical vision.
+
+       Coloured by FAMILY, not exact string: requesting --itypes hb never
+       actually produces a row labelled plain "hb" -- getcontacts always emits
+       the more specific hbbb/hbsb/hbss (backbone/side-chain profile) or
+       hbls/hblb/lhb (ligand h-bonds), confirmed by running --itypes hb
+       directly and reading the output. Water bridges (wb/wb2/lwb/lwb2)
+       group the same way. See itypeFamily() below, which resolves any raw
+       label to one of these classes -- 'hp' only ever appears via --itypes
+       all (see _CONTACTS_ITYPES), never as a standalone selection, but real
+       rows can still carry it so it needs a colour too. */
+    .itype-hb    { background: #0072B2; color: #fff; }  /* hydrogen bond (any hb*/lhb variant) -- blue */
+    .itype-sb    { background: #D55E00; color: #fff; }  /* salt bridge     -- vermillion */
+    .itype-vdw   { background: #56B4E9; color: #000; }  /* van der Waals   -- sky blue */
+    .itype-pc    { background: #009E73; color: #fff; }  /* pi-cation       -- bluish green */
+    .itype-ps    { background: #F0E442; color: #000; }  /* pi-stacking     -- yellow */
+    .itype-ts    { background: #CC79A7; color: #000; }  /* t-stacking      -- reddish purple */
+    .itype-hp    { background: #E69F00; color: #000; }  /* hydrophobic     -- orange */
+    .itype-wb    { background: #999999; color: #fff; }  /* water bridge (any wb*/lwb* variant) -- grey */
+    .itype-other { background: #E5E7EB; color: #1C1C1E; }  /* anything not recognised above */
+
+    .key-list { display: flex; flex-direction: column; gap: 11px; }
+    .key-row { font-size: 12.5px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .key-sub {
+        flex-basis: 100%; font-size: 10.5px; color: var(--text-muted);
+        font-family: var(--font-mono); margin-left: 2px;
+    }
+
+    .tab-strip { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 4px; }
+    .tab-btn {
+        padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+        background: none; border: none; border-bottom: 2px solid transparent;
+        cursor: pointer; margin-bottom: -1px;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { padding-top: 14px; }
+</style>
+</style>
+</head>
+<body>
+<div class="px-page">
+    <h2>Contacts explorer</h2>
+    <p class="subtitle">Upload a structure, pick two chains, get their getcontacts interface — with
+        ready-to-paste ChimeraX/PyMOL residue selections.</p>
+
+    <div class="card">
+        <h3>Upload structure</h3>
+        <div class="file-drop" id="drop" onclick="document.getElementById('modelFile').click()">
+            <input type="file" id="modelFile" accept=".pdb,.ent" onchange="setFile(this)">
+            <div class="drop-label">Drop a <strong>.pdb</strong> file here or click to browse</div>
+            <div class="chosen" id="chosen"></div>
+        </div>
+        <div class="hint">
+            Interactions are calculated according to this getcontacts
+            <a href="https://getcontacts.github.io/interactions.html" target="_blank"
+               rel="noopener">schema</a>. Please ensure for best performance that there are
+            hydrogens in your model. A .pdb only — mmCIF is not parsed here. getcontacts is
+            VMD-based, so it detects contacts to ligands and glycans too, and any chain that
+            includes them is selectable below (water is excluded from the chain list — nobody
+            wants to compare against it).
+        </div>
+        <div style="margin-top:16px;">
+            <button class="btn btn-primary" id="uploadBtn" onclick="uploadFile()">Upload →</button>
+        </div>
+    </div>
+
+    <div class="card" id="picker">
+        <h3>Compare two chains</h3>
+        <div class="chain-row">
+            <div class="field">
+                <label for="chain1">Chain 1</label>
+                <select id="chain1" onchange="onChainChange()"></select>
+            </div>
+            <div class="field">
+                <label for="chain2">Chain 2</label>
+                <select id="chain2" onchange="onChainChange()"></select>
+            </div>
+        </div>
+        <div class="hint">The table and 3D view update as soon as you change a chain.</div>
+    </div>
+
+    <div class="cx-grid" id="results">
+        <div class="card">
+            <h3>Structure</h3>
+            <div id="viewer"></div>
+            <div class="viewer-legend">
+                <span><span class="swatch" style="background:#E8823A;"></span>chain 1</span>
+                <span><span class="swatch" style="background:#3B82C4;"></span>chain 2</span>
+                <span><span class="swatch" style="background:#DC2626;"></span>contact residues</span>
+                <span><span class="swatch" style="background:#D9D9D9;"></span>everything else</span>
+            </div>
+            <div class="hint">
+                Highlighted residues are matched by number only — an insertion-coded residue
+                (e.g. 104A) highlights via its base number 104. The selection strings below are
+                exact, insertion codes included.
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Interface</h3>
+
+            <div class="itype-grid" id="itypeGrid"></div>
+            <div class="hint" id="pickerHint"></div>
+
+            <div class="stat-row" style="margin-top:16px;">
+                <div class="stat"><b id="statPairs">—</b>contact pairs</div>
+                <div class="stat"><b id="statRes1">—</b><span id="statRes1Label">chain 1 residues</span></div>
+                <div class="stat"><b id="statRes2">—</b><span id="statRes2Label">chain 2 residues</span></div>
+                <span class="live-status" id="liveStatus">computing…</span>
+            </div>
+
+            <div class="tab-strip" role="tablist">
+                <button class="tab-btn active" id="tabBtnAll" onclick="showTab('all')">All contacts</button>
+                <button class="tab-btn" id="tabBtnUnique" onclick="showTab('unique')">Unique pairs</button>
+                <button class="tab-btn" id="tabBtnRes" onclick="showTab('res')">Residue lists</button>
+            </div>
+
+            <div class="tab-panel" id="tabAll">
+                <div class="hint">
+                    One row per atom-atom contact — the same residue pair can appear more than
+                    once here if several atoms or interaction types are involved.
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn-mini" onclick="downloadCsv('all', 'contacts')">Download CSV</button>
+                </div>
+                <div class="tbl-wrap">
+                    <table class="contacts" id="contactsTbl"></table>
+                </div>
+                <div class="hint" id="truncNotice"></div>
+            </div>
+
+            <div class="tab-panel" id="tabUnique" style="display:none;">
+                <div class="hint">
+                    One row per contacting residue pair, deduplicated across atoms — matching
+                    what <code>get_unique_contact_pairs.py</code> did to <code>residue_mapping.csv</code>,
+                    with every interaction type seen for that pair listed together.
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn-mini" onclick="downloadCsv('unique', 'unique_pairs')">Download CSV</button>
+                </div>
+                <div class="tbl-wrap">
+                    <table class="contacts" id="uniqueTbl"></table>
+                </div>
+                <div class="hint" id="uniqueTruncNotice"></div>
+            </div>
+
+            <div class="tab-panel" id="tabRes" style="display:none;">
+                <div class="hint">
+                    Unique contacted residue numbers per chain — matching the
+                    <code>unique_numbers_&lt;chain&gt;.txt</code> files the original
+                    <code>extract_unique_residues</code> script wrote, one per chain.
+                </div>
+                <div class="sel-box">
+                    <div class="sel-head"><b id="sel1Title">Chain 1 selection</b>
+                        <span>
+                            <button class="btn-mini" onclick="copySel('sel1plus')">Copy for ChimeraX</button>
+                            <button class="btn-mini" onclick="downloadTxt(1)">Download .txt</button>
+                        </span>
+                    </div>
+                    <code id="sel1plus"></code>
+                </div>
+                <div class="sel-box">
+                    <div class="sel-head"><b id="sel2Title">Chain 2 selection</b>
+                        <span>
+                            <button class="btn-mini" onclick="copySel('sel2plus')">Copy for ChimeraX</button>
+                            <button class="btn-mini" onclick="downloadTxt(2)">Download .txt</button>
+                        </span>
+                    </div>
+                    <code id="sel2plus"></code>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" id="keyPanel">
+            <h3>Interaction types</h3>
+            <div class="key-list">
+                <div class="key-row"><span class="itype-tag itype-sb">sb</span> salt bridge</div>
+                <div class="key-row"><span class="itype-tag itype-pc">pc</span> pi-cation</div>
+                <div class="key-row"><span class="itype-tag itype-ps">ps</span> pi-stacking</div>
+                <div class="key-row"><span class="itype-tag itype-ts">ts</span> t-stacking</div>
+                <div class="key-row"><span class="itype-tag itype-vdw">vdw</span> van der Waals</div>
+                <div class="key-row"><span class="itype-tag itype-hp">hp</span> hydrophobic</div>
+                <div class="key-row">
+                    <span class="itype-tag itype-hb">hb</span> hydrogen bond
+                    <div class="key-sub">covers hbbb, hbsb, hbss, hbls, hblb, lhb</div>
+                </div>
+                <div class="key-row">
+                    <span class="itype-tag itype-wb">wb</span> water bridge
+                    <div class="key-sub">covers wb, wb2, lwb, lwb2</div>
+                </div>
+                <div class="key-row"><span class="itype-tag itype-other">other</span> unrecognised label</div>
+            </div>
+            <div class="hint">
+                Colours group by family, not exact string — get_static_contacts.py reports the
+                more specific variant (e.g. hbss), never the bare family name.
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+<script src="contacts.js"></script>
+<script>
+function showToast(msg, type) {
+    let t = document.getElementById('_toast');
+    if (!t) {
+        t = document.createElement('div');
+        t.id = '_toast';
+        t.style.cssText = 'position:fixed;bottom:22px;left:50%;transform:translateX(-50%);' +
+            'padding:9px 18px;border-radius:8px;font-size:13px;color:#fff;z-index:99;' +
+            'background:' + (type === 'error' ? '#c62828' : '#3B82C4') + ';' +
+            'opacity:0;transition:opacity .18s;box-shadow:0 2px 10px rgba(0,0,0,.25)';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+    t.style.opacity = '1';
+    clearTimeout(t._h);
+    t._h = setTimeout(() => { t.style.opacity = '0'; }, 2600);
+}
+// The server is only ever asked for itypes=['all'] (see runContacts). Every
+// interaction-type checkbox afterward filters that one cached response
+// client-side -- no new subprocess run, no new network round trip. This is
+// what makes toggling a box instant instead of re-running getcontacts.
+let _pdbText = null, _lastResult = null;
+let _viewer = null, _viewerZoomed = false;   // reused across updates -- see renderViewer
+let _reqSeq = 0;   // guards against a slow response clobbering a newer one
+
+// The view actually on screen right now (post-filter) -- what downloads and
+// copy buttons read from, so they always match what's displayed.
+let _view = null;
+
+function setFile(input) {
+    document.getElementById('chosen').textContent =
+        input.files[0] ? input.files[0].name : '';
+}
+
+const drop = document.getElementById('drop');
+['dragover', 'dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault();
+    drop.classList.toggle('drag-over', ev === 'dragover');
+    if (ev === 'drop') {
+        document.getElementById('modelFile').files = e.dataTransfer.files;
+        setFile(document.getElementById('modelFile'));
+    }
+}));
+
+async function uploadFile() {
+    const input = document.getElementById('modelFile');
+    if (!input.files[0]) { showToast('Choose a .pdb first', 'error'); return; }
+    const btn = document.getElementById('uploadBtn');
+    btn.disabled = true; btn.textContent = 'Reading…';
+    try {
+        const fileText = await input.files[0].text();
+        const parsed = parsePDB(fileText);
+        const d = {
+            pdb_text: fileText,
+            chains: Object.keys(parsed.chains)
+                .filter(c => !parsed.chains[c]._water)
+                .sort()
+                .map(c => ({ id: c, residues: parsed.chains[c].length })),
+            itypes: ['all', 'sb', 'pc', 'ps', 'ts', 'vdw', 'hp'],
+        };
+        _pdbText = fileText;
+
+        const c1 = document.getElementById('chain1'), c2 = document.getElementById('chain2');
+        c1.innerHTML = ''; c2.innerHTML = '';
+        d.chains.forEach(c => {
+            const label = c.id + '  (' + c.residues + ' res)';
+            c1.add(new Option(label, c.id));
+            c2.add(new Option(label, c.id));
+        });
+        if (d.chains.length > 1) c2.selectedIndex = 1;
+
+        const grid = document.getElementById('itypeGrid');
+        grid.innerHTML = '';
+        d.itypes.forEach(t => {
+            const id = 'itype_' + t;
+            grid.insertAdjacentHTML('beforeend',
+                '<label><input type="checkbox" id="' + id + '" value="' + t + '"' +
+                (t === 'all' ? ' checked' : '') + ' onchange="onItypeChange(this.value)">' + t + '</label>');
+        });
+        document.getElementById('pickerHint').textContent =
+            '"all" covers every interaction type get_static_contacts.py supports (the default); ' +
+            'check off a specific subset instead to narrow it. Everything is already fetched, ' +
+            'so narrowing is instant -- it filters in the browser, it does not re-run getcontacts.';
+
+        document.getElementById('picker').style.display = 'block';
+        document.getElementById('results').style.display = 'grid';
+        _viewer = null; _viewerZoomed = false;   // fresh model -> fresh viewer
+        renderViewer();
+        showToast('Uploaded', 'success');
+        runContacts();   // live: show results for the default pair immediately, no click needed
+    } catch (e) {
+        showToast('Network error during upload', 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Upload →';
+    }
+}
+
+function onChainChange() {
+    renderViewer();   // instant recolor, no need to wait on the network
+    runContacts();
+}
+
+// 'all' and the specific types are mutually exclusive in the UI (matching how
+// the CLI itself treats them -- 'all' is not additive with a subset). No
+// network call here: the full 'all' result is already cached in _lastResult,
+// so a checkbox change only needs to re-filter and re-render it.
+function onItypeChange(changed) {
+    const all = document.getElementById('itype_all');
+    if (changed === 'all' && all.checked) {
+        document.querySelectorAll('#itypeGrid input').forEach(cb => {
+            if (cb.id !== 'itype_all') cb.checked = false;
+        });
+    } else if (changed !== 'all') {
+        const cb = document.getElementById('itype_' + changed);
+        if (cb.checked) all.checked = false;
+    }
+    if (![...document.querySelectorAll('#itypeGrid input')].some(cb => cb.checked)) {
+        all.checked = true;   // never leave every box unchecked
+    }
+    applyFilterAndRender();
+}
+
+function selectedItypes() {
+    const boxes = [...document.querySelectorAll('#itypeGrid input:checked')].map(b => b.value);
+    return boxes.length ? boxes : ['all'];
+}
+
+// A fresh viewer (and a fresh zoomTo/camera reset) only happens once per upload
+// -- not on every chain or interaction-type change. Recreating the whole WebGL
+// viewer on every "live" update was wasteful and reset the camera each time,
+// which is most of what "keeps popping out" was: every keystroke snapped the
+// view back to a default fit instead of leaving the user's rotation/zoom alone.
+function renderViewer(highlightPairs) {
+    if (!_pdbText || typeof $3Dmol === 'undefined') return;
+    if (!_viewer) {
+        const el = document.getElementById('viewer');
+        el.innerHTML = '';
+        _viewer = $3Dmol.createViewer(el, { backgroundColor: 'white' });
+        _viewer.addModel(_pdbText, 'pdb');
+    }
+    const viewer = _viewer;
+
+    const c1 = document.getElementById('chain1').value;
+    const c2 = document.getElementById('chain2').value;
+    viewer.setStyle({}, { cartoon: { color: '#D9D9D9' } });
+    if (c1) viewer.setStyle({ chain: c1 }, { cartoon: { color: '#E8823A' } });
+    if (c2) viewer.setStyle({ chain: c2 }, { cartoon: { color: '#3B82C4' } });
+
+    if (highlightPairs && highlightPairs.length) {
+        // Highlight by base residue number only -- see the note under the viewer.
+        const r1 = [...new Set(highlightPairs.map(p => p.resnum1))];
+        const r2 = [...new Set(highlightPairs.map(p => p.resnum2))];
+        if (r1.length) viewer.addStyle({ chain: c1, resi: r1 }, { stick: { color: '#DC2626' } });
+        if (r2.length) viewer.addStyle({ chain: c2, resi: r2 }, { stick: { color: '#DC2626' } });
+    }
+
+    if (!_viewerZoomed) { viewer.zoomTo(); _viewerZoomed = true; }
+    viewer.render();
+}
+
+// Only fires on a chain change (upload counts as one) -- never on an
+// interaction-type checkbox, which is now a pure client-side filter over
+// this cached result (see applyFilterAndRender). Always requests itypes=
+// ['all'], regardless of what is currently checked: 'all' is a strict
+// superset of every other combination get_static_contacts.py can compute,
+// so one fetch covers every possible filter state and a checkbox toggle
+// never needs to ask the server again.
+//
+// _reqSeq still guards this: two chain changes in quick succession can leave
+// two requests in flight, and a slow first reply must not clobber a faster
+// second one.
+async function runContacts() {
+    if (!_pdbText) return;
+    const chain1 = document.getElementById('chain1').value;
+    const chain2 = document.getElementById('chain2').value;
+    if (!chain1 || !chain2) return;
+    if (chain1 === chain2) {
+        showToast('Pick two different chains', 'error');
+        return;
+    }
+
+    const mySeq = ++_reqSeq;
+    const status = document.getElementById('liveStatus');
+    status.classList.add('on');
+    await new Promise(r => setTimeout(r, 0));   // let the status pill paint
+    try {
+        const rows = computeContacts(_pdbText, chain1, chain2);
+        if (mySeq !== _reqSeq) return;   // a newer run has since started; drop this one
+        _lastResult = { success: true, chain1, chain2, pairs: rows, truncated: false };
+        applyFilterAndRender();
+    } catch (e) {
+        if (mySeq === _reqSeq) showToast('Computation error: ' + e.message, 'error');
+    } finally {
+        if (mySeq === _reqSeq) status.classList.remove('on');
+    }
+}
+
+// Raw itype label -> family name, matching the checkbox 'value' vocabulary.
+// Used for BOTH colouring (family -> CSS class below) and client-side
+// filtering (is this row's family among the checked boxes) -- one mapping,
+// not two, so they can't quietly drift apart. Family, not exact string,
+// because requesting hb/wb never yields a row literally labelled "hb"/"wb",
+// only the more specific variants (see the CSS comment further up).
+const KNOWN_FAMILIES = new Set(['sb', 'pc', 'ps', 'ts', 'vdw', 'hp', 'hb', 'wb']);
+const FAMILY_CLASS = { sb: 'itype-sb', pc: 'itype-pc', ps: 'itype-ps', ts: 'itype-ts',
+                       vdw: 'itype-vdw', hp: 'itype-hp', hb: 'itype-hb', wb: 'itype-wb',
+                       other: 'itype-other' };
+function itypeFamily(t) {
+    if (KNOWN_FAMILIES.has(t)) return t;
+    if (t === 'lhb' || t.startsWith('hb')) return 'hb';
+    if (t.startsWith('wb') || t.startsWith('lwb')) return 'wb';
+    return 'other';
+}
+function itypeTag(t) {
+    return '<span class="itype-tag ' + FAMILY_CLASS[itypeFamily(t)] + '">' + t + '</span>';
+}
+
+// Everything below is a pure function over the cached 'all' fetch -- no DOM,
+// no network -- so a checkbox toggle can call straight through to rendering
+// with no round trip. These mirror _residue_selection / _unique_pairs /
+// _contacts_csv / _unique_pairs_csv in app.py exactly, because the server
+// still needs its own copies for the initial payload; keep the two in sync
+// if the logic ever changes on one side.
+
+function filterPairs(pairs) {
+    const checked = selectedItypes();
+    if (checked.includes('all')) return pairs;
+    return pairs.filter(p => checked.includes(itypeFamily(p.itype)));
+}
+
+function residueSelection(pairs, side) {
+    const seen = new Map();
+    for (const p of pairs) {
+        const num = p['resnum' + side], label = p['resnum' + side + '_label'];
+        seen.set(num + '|' + label, { num, label });
+    }
+    const ordered = [...seen.values()]
+        .sort((a, b) => a.num - b.num || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+        .map(e => e.label);
+    return { list: ordered, comma: ordered.join(','), plus: ordered.join('+') };
+}
+
+function uniquePairs(pairs) {
+    const seen = new Map();
+    for (const p of pairs) {
+        const key = p.resnum1 + '|' + p.resnum1_label + '|' + p.resnum2 + '|' + p.resnum2_label;
+        if (!seen.has(key)) {
+            seen.set(key, { resnum1_label: p.resnum1_label, resname1: p.resname1,
+                           resnum2_label: p.resnum2_label, resname2: p.resname2,
+                           _n1: p.resnum1, _n2: p.resnum2, itypes: new Set(), min_dist: null });
+        }
+        const row = seen.get(key);
+        row.itypes.add(p.itype);
+        if (p.dist != null && (row.min_dist == null || p.dist < row.min_dist))
+            row.min_dist = p.dist;
+    }
+    return [...seen.values()]
+        .sort((a, b) => a._n1 - b._n1 || a._n2 - b._n2)
+        .map(r => ({ resnum1_label: r.resnum1_label, resname1: r.resname1,
+                    resnum2_label: r.resnum2_label, resname2: r.resname2,
+                    itypes: [...r.itypes].sort(), min_dist: r.min_dist }));
+}
+
+function pairsCsv(pairs, chain1, chain2) {
+    let out = chain1 + ',' + chain2 + ',interaction_type,distance_A\r\n';
+    for (const p of pairs)
+        out += p.resnum1_label + ',' + p.resnum2_label + ',' + p.itype + ','
+             + (p.dist == null ? '' : p.dist.toFixed(2)) + '\r\n';
+    return out;
+}
+
+function uniquePairsCsv(unique, chain1, chain2) {
+    let out = chain1 + ',' + chain2 + ',interaction_types,min_distance_A\r\n';
+    for (const r of unique)
+        out += r.resnum1_label + ',' + r.resnum2_label + ',' + r.itypes.join(';') + ','
+             + (r.min_dist == null ? '' : r.min_dist.toFixed(2)) + '\r\n';
+    return out;
+}
+
+// Re-derives every displayed number from the cached 'all' fetch plus whatever
+// is currently checked. Called on chain change (after a fresh fetch) and on
+// every interaction-type checkbox change (no fetch at all).
+function applyFilterAndRender() {
+    if (!_lastResult) return;
+    const d = _lastResult;
+    const pairs = filterPairs(d.pairs);
+    const unique = uniquePairs(pairs);
+    _view = {
+        chain1: d.chain1, chain2: d.chain2, pairs, unique,
+        res1: residueSelection(pairs, '1'), res2: residueSelection(pairs, '2'),
+        truncated: d.truncated,   // caps on the underlying 'all' fetch, not this filter
+    };
+    renderResults();
+    renderViewer(pairs);
+}
+
+function renderResults() {
+    const v = _view;
+    document.getElementById('results').style.display = 'grid';
+    document.getElementById('statPairs').textContent = v.pairs.length;
+    document.getElementById('statRes1').textContent = v.res1.list.length;
+    document.getElementById('statRes1Label').textContent = 'chain ' + v.chain1 + ' residues';
+    document.getElementById('statRes2').textContent = v.res2.list.length;
+    document.getElementById('statRes2Label').textContent = 'chain ' + v.chain2 + ' residues';
+
+    document.getElementById('sel1Title').textContent = 'Chain ' + v.chain1 + ' selection';
+    document.getElementById('sel2Title').textContent = 'Chain ' + v.chain2 + ' selection';
+    document.getElementById('sel1plus').textContent =
+        v.res1.plus ? ('/' + v.chain1 + ':' + v.res1.plus) : '(no contacts)';
+    document.getElementById('sel2plus').textContent =
+        v.res2.plus ? ('/' + v.chain2 + ':' + v.res2.plus) : '(no contacts)';
+
+    const rows = sortedRows('all', v.pairs).map(p =>
+        '<tr><td>' + v.chain1 + ' ' + p.resname1 + p.resnum1_label + '</td><td>' + p.atom1 + '</td>' +
+        '<td>' + itypeTag(p.itype) + '</td>' +
+        '<td>' + (p.dist == null ? '—' : p.dist.toFixed(2)) + '</td>' +
+        '<td>' + p.atom2 + '</td><td>' + v.chain2 + ' ' + p.resname2 + p.resnum2_label + '</td></tr>'
+    ).join('');
+    document.getElementById('contactsTbl').innerHTML =
+        '<thead><tr>' + sortHeader('all', 'resnum1', 'chain 1') + sortHeader('all', 'atom1', 'atom')
+        + sortHeader('all', 'itype', 'type') + sortHeader('all', 'dist', 'Å')
+        + sortHeader('all', 'atom2', 'atom')
+        + sortHeader('all', 'resnum2', 'chain 2') + '</tr></thead>'
+        + '<tbody>' + rows + '</tbody>';
+    document.getElementById('truncNotice').textContent = v.truncated
+        ? 'The underlying fetch capped at the server limit; download the CSV for a note on that, or narrow the chains.' : '';
+
+    const uRows = sortedRows('unique', v.unique).map(p =>
+        '<tr><td>' + v.chain1 + ' ' + p.resname1 + p.resnum1_label + '</td>' +
+        '<td>' + p.itypes.map(itypeTag).join(' ') + '</td>' +
+        '<td>' + (p.min_dist == null ? '—' : p.min_dist.toFixed(2)) + '</td>' +
+        '<td>' + v.chain2 + ' ' + p.resname2 + p.resnum2_label + '</td></tr>'
+    ).join('');
+    document.getElementById('uniqueTbl').innerHTML =
+        '<thead><tr>' + sortHeader('unique', 'resnum1', 'chain 1')
+        + sortHeader('unique', 'itypes', 'interaction type(s)')
+        + sortHeader('unique', 'min_dist', 'Å')
+        + sortHeader('unique', 'resnum2', 'chain 2') + '</tr></thead>'
+        + '<tbody>' + uRows + '</tbody>';
+    document.getElementById('uniqueTruncNotice').textContent = v.truncated
+        ? 'The underlying fetch capped at the server limit; narrow the chains for a complete set.' : '';
+}
+
+// Column sort, per table. null key = natural order (already sorted by
+// residue number from residueSelection/uniquePairs upstream). Purely a
+// display concern -- it re-sorts whatever applyFilterAndRender already
+// computed, so clicking a header is as free as an interaction-type checkbox:
+// no re-fetch, no re-filter, just a re-render.
+const _sort = { all: { key: null, dir: 1 }, unique: { key: null, dir: 1 } };
+
+const SORT_KEYS = {
+    all: {
+        resnum1: p => p.resnum1,
+        atom1:   p => p.atom1,
+        itype:   p => p.itype,
+        dist:    p => (p.dist == null ? Infinity : p.dist),   // unknown distances sort last
+        atom2:   p => p.atom2,
+        resnum2: p => p.resnum2,
+    },
+    unique: {
+        // resnum*_label carries the insertion code (e.g. "104A"); parseInt
+        // reads its leading digits, which is enough to sort numerically --
+        // the label itself is never used to sort, since string order would
+        // put "104A" before "20".
+        resnum1: r => parseInt(r.resnum1_label, 10),
+        itypes:  r => r.itypes.join(','),
+        min_dist: r => (r.min_dist == null ? Infinity : r.min_dist),
+        resnum2: r => parseInt(r.resnum2_label, 10),
+    },
+};
+
+function sortedRows(table, rows) {
+    const st = _sort[table];
+    if (!st.key) return rows;
+    const acc = SORT_KEYS[table][st.key];
+    return rows.slice().sort((a, b) => {
+        const av = acc(a), bv = acc(b);
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return cmp * st.dir;
+    });
+}
+
+// Clicking the active column reverses direction; clicking a different one
+// selects it ascending. Only re-renders -- see the comment on _sort above.
+function sortTable(table, key) {
+    const st = _sort[table];
+    if (st.key === key) st.dir *= -1; else { st.key = key; st.dir = 1; }
+    renderResults();
+}
+
+function sortHeader(table, key, label) {
+    const st = _sort[table];
+    const arrow = st.key === key ? (st.dir === 1 ? ' ▲' : ' ▼') : '';
+    const cls = 'sortable' + (st.key === key ? ' sort-active' : '');
+    return '<th class="' + cls + '" onclick="sortTable(\'' + table + '\', \'' + key + '\')">'
+         + label + arrow + '</th>';
+}
+
+function showTab(name) {
+    ['all', 'unique', 'res'].forEach(n => {
+        document.getElementById('tab' + (n === 'all' ? 'All' : n === 'unique' ? 'Unique' : 'Res'))
+            .style.display = (n === name) ? 'block' : 'none';
+        document.getElementById('tabBtn' + (n === 'all' ? 'All' : n === 'unique' ? 'Unique' : 'Res'))
+            .classList.toggle('active', n === name);
+    });
+}
+
+function copySel(id) {
+    const text = document.getElementById(id).textContent;
+    if (!text || text.startsWith('(')) { showToast('Nothing to copy', 'error'); return; }
+    navigator.clipboard.writeText(text).then(
+        () => showToast('Copied', 'success'),
+        () => showToast('Could not copy — select and copy manually', 'error'));
+}
+
+function _triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 120000);
+}
+
+// which: 'all' (atom-pair rows) or 'unique' (deduplicated pairs). Built from
+// _view -- the currently filtered set -- so a download always matches what's
+// on screen, including whatever interaction types are checked right now.
+function downloadCsv(which, label) {
+    if (!_view) return;
+    const text = which === 'unique'
+        ? uniquePairsCsv(_view.unique, _view.chain1, _view.chain2)
+        : pairsCsv(_view.pairs, _view.chain1, _view.chain2);
+    _triggerDownload(new Blob([text], { type: 'text/csv' }),
+        label + '_' + _view.chain1 + '_' + _view.chain2 + '.csv');
+}
+
+// One .txt per chain, matching the original extract_unique_residues script's
+// unique_numbers_<chain>.txt shape: a single comma-separated line.
+function downloadTxt(chainNum) {
+    if (!_view) return;
+    const chain = _view['chain' + chainNum];
+    const residues = _view['res' + chainNum];
+    if (!residues.comma) { showToast('No contacts to download', 'error'); return; }
+    _triggerDownload(new Blob([residues.comma], { type: 'text/plain' }),
+        'unique_numbers_' + chain + '.txt');
+}
+</script>
+</script>
+</body>
+</html>
