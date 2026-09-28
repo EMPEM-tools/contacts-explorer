@@ -462,7 +462,9 @@ function renderViewer(highlightPairs) {
 
     if (!_viewerZoomed) { viewer.zoomTo(); _viewerZoomed = true; }
     viewer.render();
+    applyHoverStyles();   // re-arm hover on the freshly re-styled atoms
 }
+
 
 // Only fires on a chain change (upload counts as one) -- never on an
 // interaction-type checkbox, which is a pure client-side filter over this
@@ -747,7 +749,52 @@ function downloadTxt(chainNum) {
     _triggerDownload(new Blob([residues.comma], { type: 'text/plain' }),
         'unique_numbers_' + chain + '.txt');
 }
-</script>
+
+// ── hover-to-highlight ────────────────────────────────────────────────────
+// 3Dmol's native hover API: atoms flagged { hoverable: true, hover_callback }
+// get the callback on mouse-over with (atom, viewer). We arm every atom
+// after each renderViewer pass (chain/contact styles overwrite ours, so
+// re-arm on every render) and use the callback to yellow-sphere the hovered
+// atom + label its residue under the viewer. unhover_callback hides again.
+let _hoverLabel = null;
+function _ensureHoverLabel() {
+    if (_hoverLabel) return;
+    _hoverLabel = document.createElement('div');
+    _hoverLabel.id = 'hoverInfo';
+    _hoverLabel.style.cssText = 'font-size:12px;font-family:var(--font-mono);' +
+        'color:var(--text-muted);margin-top:6px;min-height:16px;';
+    const v = document.getElementById('viewer');
+    v.parentNode.insertBefore(_hoverLabel, v.nextSibling);
+}
+
+function _resLabel(atom) {
+    return (atom.chain || '?') + ' ' + (atom.resn || '') +
+           (atom.resi != null ? atom.resi : '') +
+           (atom.atom ? '  ·  ' + atom.atom : '');
+}
+
+function applyHoverStyles() {
+    if (!_viewer || !_viewer.getModel()) return;
+    _ensureHoverLabel();
+    _viewer.getModel().atoms.forEach(atom => {
+        atom.hoverable = true;
+        atom.hover_callback = (a, viewer) => {
+            viewer.setStyle({ serial: a.serial },
+                            { sphere: { color: '#F5C518', radius: 1.0 } });
+            viewer.render();
+            _hoverLabel.textContent = _resLabel(a);
+        };
+        atom.unhover_callback = (a, viewer) => {
+            // 3Dmol has no removeStyle — hide the sphere instead
+            viewer.setStyle({ serial: a.serial },
+                            { sphere: { radius: 0.01, opacity: 0.0, hidden: true } });
+            viewer.render();
+            _hoverLabel.textContent = '';
+        };
+    });
+    _viewer.render();
+}
+
 </script>
 </body>
 </html>
