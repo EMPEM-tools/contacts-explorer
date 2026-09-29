@@ -445,6 +445,7 @@ function renderViewer(highlightPairs) {
         _viewer.addModel(_pdbText, 'pdb');
     }
     const viewer = _viewer;
+    window.__ce_viewer = _viewer;   // debug/test hook
 
     const c1 = document.getElementById('chain1').value;
     const c2 = document.getElementById('chain2').value;
@@ -751,20 +752,22 @@ function downloadTxt(chainNum) {
 }
 
 // ── hover-to-highlight ────────────────────────────────────────────────────
-// 3Dmol's native hover API: atoms flagged { hoverable: true, hover_callback }
-// get the callback on mouse-over with (atom, viewer). We arm every atom
-// after each renderViewer pass (chain/contact styles overwrite ours, so
-// re-arm on every render) and use the callback to yellow-sphere the hovered
-// atom + label its residue under the viewer. unhover_callback hides again.
-let _hoverLabel = null;
-function _ensureHoverLabel() {
-    if (_hoverLabel) return;
-    _hoverLabel = document.createElement('div');
-    _hoverLabel.id = 'hoverInfo';
-    _hoverLabel.style.cssText = 'font-size:12px;font-family:var(--font-mono);' +
-        'color:var(--text-muted);margin-top:6px;min-height:16px;';
-    const v = document.getElementById('viewer');
-    v.parentNode.insertBefore(_hoverLabel, v.nextSibling);
+// Label-only hover: a small tooltip follows the cursor naming the residue
+// under it. Deliberately NO viewer.render() and no style changes on hover —
+// re-rendering the whole WebGL scene per mouse-move was the lag in the
+// first version (which also swapped in a yellow sphere). This one is pure
+// DOM: instant.
+let _tip = null, _tipMouseArmed = false, _lastMouse = { x: 0, y: 0 };
+
+function _tipEl() {
+    if (_tip) return _tip;
+    _tip = document.createElement('div');
+    _tip.id = 'hoverTip';
+    _tip.style.cssText = 'position:fixed;pointer-events:none;z-index:99;' +
+        'background:#1c1c1e;color:#fff;font-size:12px;font-family:var(--font-mono);' +
+        'padding:4px 10px;border-radius:5px;opacity:0;transition:opacity .08s;';
+    document.body.appendChild(_tip);
+    return _tip;
 }
 
 function _resLabel(atom) {
@@ -775,24 +778,24 @@ function _resLabel(atom) {
 
 function applyHoverStyles() {
     if (!_viewer || !_viewer.getModel()) return;
-    _ensureHoverLabel();
+    if (!_tipMouseArmed) {
+        _tipMouseArmed = true;
+        document.addEventListener('mousemove',
+            e => { _lastMouse.x = e.clientX; _lastMouse.y = e.clientY; });
+    }
     _viewer.getModel().atoms.forEach(atom => {
         atom.hoverable = true;
-        atom.hover_callback = (a, viewer) => {
-            viewer.setStyle({ serial: a.serial },
-                            { sphere: { color: '#F5C518', radius: 1.0 } });
-            viewer.render();
-            _hoverLabel.textContent = _resLabel(a);
+        atom.hover_callback = (a) => {
+            const t = _tipEl();
+            t.textContent = _resLabel(a);
+            t.style.left = (_lastMouse.x + 16) + 'px';
+            t.style.top = (_lastMouse.y + 16) + 'px';
+            t.style.opacity = '1';
         };
-        atom.unhover_callback = (a, viewer) => {
-            // 3Dmol has no removeStyle — hide the sphere instead
-            viewer.setStyle({ serial: a.serial },
-                            { sphere: { radius: 0.01, opacity: 0.0, hidden: true } });
-            viewer.render();
-            _hoverLabel.textContent = '';
-        };
+        atom.unhover_callback = () => { _tipEl().style.opacity = '0'; };
     });
-    _viewer.render();
+    // no viewer.render() here: hover never touches styles, so the render
+    // renderViewer already did is still current
 }
 
 </script>
